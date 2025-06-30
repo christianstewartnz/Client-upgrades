@@ -1,14 +1,15 @@
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, LogOut } from "lucide-react"
 
 interface ClientHeaderProps {
   project_name: string
   development_company: string
+  onLogout?: () => void
 }
 
-export function ClientHeader({ project_name, development_company }: ClientHeaderProps) {
+export function ClientHeader({ project_name, development_company, onLogout }: ClientHeaderProps) {
   return (
     <header className="bg-white border-b">
       <div className="max-w-4xl mx-auto px-6 py-4">
@@ -18,12 +19,19 @@ export function ClientHeader({ project_name, development_company }: ClientHeader
             <p className="text-gray-600">{development_company}</p>
           </div>
           <div className="mt-2 md:mt-0">
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Portal
-              </Link>
-            </Button>
+            {onLogout ? (
+              <Button variant="outline" size="sm" onClick={onLogout}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to Portal
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
       </div>

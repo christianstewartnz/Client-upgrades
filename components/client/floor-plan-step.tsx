@@ -7,8 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { X, MapPin, Info } from "lucide-react"
+import { X, MapPin, Info, ZoomIn, ZoomOut, Maximize, Move, RotateCcw } from "lucide-react"
 import type { FloorPlanPoint, ClientUpgrade } from '@/types/client'
+import { PDFCanvas } from './pdf-canvas'
 
 interface FloorPlanStepProps {
   selected_upgrades: ClientUpgrade[]
@@ -33,6 +34,12 @@ export function FloorPlanStep({
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 })
   const [selectedUpgradeId, setSelectedUpgradeId] = useState<string | null>(null)
   const [allPoints, setAllPoints] = useState<FloorPlanPoint[]>([])
+
+  // Zoom and Pan state
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 })
 
   // Use provided floor plan URL or fallback to placeholder
   const planUrl = floor_plan_url || "/placeholder.svg?height=600&width=800"
@@ -66,15 +73,16 @@ export function FloorPlanStep({
   useEffect(() => {
     if (planUrl) {
       if (isPdf) {
-        // For PDFs, we'll set up the overlay after the PDF loads
+        // For PDFs, set proper A4 dimensions
         const container = containerRef.current
         if (container) {
-          // Set standard dimensions for PDF display
+          // A4 aspect ratio: 210mm x 297mm ≈ 1:1.414
           const containerWidth = container.clientWidth
-          const canvasWidth = Math.min(containerWidth, 800)
-          const canvasHeight = canvasWidth * 1.2 // Standard PDF aspect ratio
-
-          setImageDimensions({ width: canvasWidth, height: canvasHeight })
+          const maxWidth = Math.min(containerWidth - 40, 800) // Leave space for controls
+          const pdfWidth = maxWidth
+          const pdfHeight = maxWidth * 1.414 // A4 aspect ratio
+          
+          setImageDimensions({ width: pdfWidth, height: pdfHeight })
           setImageLoaded(true)
         }
       } else if (canvasRef.current) {
@@ -149,61 +157,77 @@ export function FloorPlanStep({
       allPoints.forEach((point) => {
         // Draw circle background
         ctx.beginPath()
-        ctx.arc(point.x, point.y, 16, 0, 2 * Math.PI)
+        ctx.arc(point.x, point.y, 10, 0, 2 * Math.PI)
         ctx.fillStyle = point.color
         ctx.fill()
         ctx.strokeStyle = "#FFFFFF"
-        ctx.lineWidth = 2
+        ctx.lineWidth = 1
         ctx.stroke()
 
         // Draw symbol text
         ctx.fillStyle = "#FFFFFF"
-        ctx.font = "bold 10px Arial"
+        ctx.font = "bold 8px Arial"
         ctx.textAlign = "center"
-        ctx.fillText(point.symbol, point.x, point.y + 3)
+        ctx.fillText(point.symbol, point.x, point.y + 2)
       })
     }
     img.src = planUrl
   }
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
-    if (!selectedUpgradeId) return
+    if (!selectedUpgradeId || !isSelecting || isPanning) return
 
     const element = isPdf ? overlayRef.current : canvasRef.current
     if (!element) return
 
-    const rect = element.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
+    let x, y
+    if (isPdf) {
+      // For PDFs, convert screen coordinates to PDF coordinates
+      const coords = screenToPdfCoordinates(event.clientX, event.clientY)
+      x = coords.x
+      y = coords.y
+    } else {
+      // For images, use direct coordinates
+      const rect = element.getBoundingClientRect()
+      x = event.clientX - rect.left
+      y = event.clientY - rect.top
+    }
 
     const selectedUpgrade = electricalUpgrades.find((u) => u.id === selectedUpgradeId)
     if (!selectedUpgrade) return
 
     // Check if we've reached the quantity limit for this upgrade
     const existingPointsForUpgrade = allPoints.filter((p) => p.upgrade_id === selectedUpgradeId)
-    if (existingPointsForUpgrade.length >= selectedUpgrade.quantity) return
-
-    const { symbol, color } = getUpgradeSymbol(selectedUpgrade.name)
-
-    const newPoint: FloorPlanPoint = {
-      id: `point-${Date.now()}`,
-      x,
-      y,
-      label: `${selectedUpgrade.name} #${existingPointsForUpgrade.length + 1}`,
-      upgrade_id: selectedUpgradeId,
-      upgrade_name: selectedUpgrade.name,
-      symbol,
-      color,
+    if (existingPointsForUpgrade.length >= selectedUpgrade.quantity) {
+      return
     }
 
+    // Create new point
+    const upgradeSymbol = getUpgradeSymbol(selectedUpgrade.name)
+    const newPoint: FloorPlanPoint = {
+      id: Date.now().toString(),
+      x,
+      y,
+      upgrade_id: selectedUpgradeId,
+      upgrade_name: selectedUpgrade.name,
+      label: `${upgradeSymbol.symbol} ${existingPointsForUpgrade.length + 1}`,
+      symbol: upgradeSymbol.symbol,
+      color: upgradeSymbol.color,
+    }
+
+    // Add to all points
     const updatedPoints = [...allPoints, newPoint]
     setAllPoints(updatedPoints)
 
-    // Update the upgrade with the new point
-    updateUpgradePoints(
-      selectedUpgradeId,
-      updatedPoints.filter((p) => p.upgrade_id === selectedUpgradeId),
-    )
+    // Update the upgrade with new floor plan points
+    const updatedPointsForUpgrade = [...existingPointsForUpgrade, newPoint]
+    updateUpgradePoints(selectedUpgradeId, updatedPointsForUpgrade)
+
+    // If we've reached the quantity, stop selecting
+    if (updatedPointsForUpgrade.length >= selectedUpgrade.quantity) {
+      setIsSelecting(false)
+      setSelectedUpgradeId(null)
+    }
   }
 
   const updateUpgradePoints = (upgradeId: string, points: FloorPlanPoint[]) => {
@@ -220,11 +244,8 @@ export function FloorPlanStep({
     const updatedPoints = allPoints.filter((p) => p.id !== pointId)
     setAllPoints(updatedPoints)
 
-    // Update the upgrade with the removed point
-    updateUpgradePoints(
-      pointToRemove.upgrade_id,
-      updatedPoints.filter((p) => p.upgrade_id === pointToRemove.upgrade_id),
-    )
+    const updatedPointsForUpgrade = updatedPoints.filter((p) => p.upgrade_id === pointToRemove.upgrade_id)
+    updateUpgradePoints(pointToRemove.upgrade_id, updatedPointsForUpgrade)
   }
 
   const getPointsForUpgrade = (upgradeId: string) => {
@@ -232,7 +253,7 @@ export function FloorPlanStep({
   }
 
   const getTotalPointsNeeded = () => {
-    return electricalUpgrades.reduce((sum, upgrade) => sum + upgrade.quantity, 0)
+    return electricalUpgrades.reduce((total, upgrade) => total + upgrade.quantity, 0)
   }
 
   const getTotalPointsPlaced = () => {
@@ -240,10 +261,70 @@ export function FloorPlanStep({
   }
 
   const canProceed = () => {
-    return electricalUpgrades.every((upgrade) => {
-      const placedPoints = getPointsForUpgrade(upgrade.id).length
-      return placedPoints === upgrade.quantity
-    })
+    return getTotalPointsPlaced() >= getTotalPointsNeeded()
+  }
+
+  // Zoom controls
+  const handleZoomIn = () => {
+    setZoom(prev => Math.min(prev * 1.2, 5))
+  }
+
+  const handleZoomOut = () => {
+    setZoom(prev => Math.max(prev / 1.2, 0.25))
+  }
+
+  const handleFitToWidth = () => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }
+
+  const handleResetView = () => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }
+
+  // Pan functionality
+  const handleMouseDown = (event: React.MouseEvent) => {
+    if (event.button === 0 && !isSelecting) { // Left mouse button and not in selecting mode
+      setIsPanning(true)
+      setLastPanPoint({ x: event.clientX, y: event.clientY })
+      event.preventDefault()
+    }
+  }
+
+  const handleMouseMove = (event: React.MouseEvent) => {
+    if (isPanning && !isSelecting) {
+      const deltaX = event.clientX - lastPanPoint.x
+      const deltaY = event.clientY - lastPanPoint.y
+      
+      setPan(prev => ({
+        x: prev.x + deltaX,
+        y: prev.y + deltaY
+      }))
+      
+      setLastPanPoint({ x: event.clientX, y: event.clientY })
+      event.preventDefault()
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsPanning(false)
+  }
+
+  const handleMouseLeave = () => {
+    setIsPanning(false)
+  }
+
+  // Convert screen coordinates to PDF coordinates accounting for zoom and pan
+  const screenToPdfCoordinates = (screenX: number, screenY: number) => {
+    const rect = overlayRef.current?.getBoundingClientRect()
+    if (!rect) return { x: screenX, y: screenY }
+    
+    // For canvas-based PDF, coordinates are relative to the container
+    const x = (screenX - rect.left - pan.x) / zoom
+    const y = (screenY - rect.top - pan.y) / zoom
+    
+    return { x, y }
   }
 
   if (!planUrl) {
@@ -313,7 +394,7 @@ export function FloorPlanStep({
               onClick={() => setIsSelecting(!isSelecting)}
               disabled={getTotalPointsPlaced() >= getTotalPointsNeeded() || !selectedUpgradeId}
             >
-              {isSelecting ? "Stop Selecting" : "Start Selecting"}
+              {isSelecting ? "Stop Selecting" : "Start Placing Points"}
             </Button>
             {allPoints.length > 0 && (
               <Button variant="outline" size="sm" onClick={() => setAllPoints([])}>
@@ -330,10 +411,40 @@ export function FloorPlanStep({
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <p className="text-sm text-blue-800">
               <Info className="w-4 h-4 inline mr-1" />
-              Click "Start Selecting" then click on the floor plan to place{" "}
+              Click "Start Placing Points" then click on the floor plan to place{" "}
               {electricalUpgrades.find(u => u.id === selectedUpgradeId)?.name} locations.
-              {isPdf && " Note: Click directly on the floor plan area, not the PDF viewer controls."}
+              {isPdf && " Use zoom and pan controls to navigate to the exact location."}
             </p>
+          </div>
+        )}
+
+        {/* Zoom Controls - Only show for PDFs */}
+        {isPdf && (
+          <div className="flex items-center gap-2 p-3 bg-gray-50 border rounded-lg">
+            <span className="text-sm font-medium text-gray-700">View Controls:</span>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" onClick={handleZoomIn} title="Zoom In">
+                <ZoomIn className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleZoomOut} title="Zoom Out">
+                <ZoomOut className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleFitToWidth} title="Fit to Width">
+                <Maximize className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleResetView} title="Reset View">
+                <RotateCcw className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="flex items-center gap-2 ml-4">
+              <Move className="w-4 h-4 text-gray-500" />
+              <span className="text-xs text-gray-600">
+                {isSelecting ? "Click to place points" : "Drag to pan, use controls to zoom"}
+              </span>
+            </div>
+            <div className="text-xs text-gray-500 ml-auto">
+              Zoom: {Math.round(zoom * 100)}%
+            </div>
           </div>
         )}
 
@@ -341,37 +452,64 @@ export function FloorPlanStep({
         <div ref={containerRef} className="border rounded-lg overflow-hidden bg-gray-50 relative">
           {isPdf ? (
             <>
-              {/* PDF Embed */}
-              <iframe
-                src={planUrl}
-                className="w-full h-96 border-0"
-                title="Floor Plan PDF"
-                onLoad={() => setImageLoaded(true)}
-              />
-              {/* Overlay for click detection */}
-              <div
-                ref={overlayRef}
-                onClick={handleClick}
-                className={`absolute inset-0 ${isSelecting ? "cursor-crosshair" : "cursor-default"}`}
+              {/* Enhanced PDF Viewer */}
+              <div 
+                className="relative bg-white"
                 style={{ 
-                  width: imageDimensions.width || '100%', 
-                  height: imageDimensions.height || '100%' 
+                  height: '600px',
+                  overflow: 'hidden',
+                  cursor: isPanning ? 'grabbing' : (isSelecting ? 'crosshair' : 'grab'),
+                  userSelect: 'none'
                 }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseLeave}
               >
-                {/* Render points on overlay */}
-                {allPoints.map((point) => (
-                  <div
-                    key={point.id}
-                    className="absolute w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold border-2 border-white shadow-lg"
-                    style={{
-                      backgroundColor: point.color,
-                      left: `${point.x - 16}px`,
-                      top: `${point.y - 16}px`,
-                    }}
-                  >
-                    {point.symbol}
+                {/* PDF Canvas Component */}
+                <PDFCanvas
+                  pdfUrl={planUrl}
+                  width={imageDimensions.width}
+                  height={imageDimensions.height}
+                  zoom={zoom}
+                  pan={pan}
+                  onLoadComplete={(success) => setImageLoaded(success)}
+                />
+
+                {/* Overlay for click detection and points */}
+                <div
+                  ref={overlayRef}
+                  onClick={handleClick}
+                  className="absolute inset-0"
+                  style={{ 
+                    zIndex: 10,
+                    pointerEvents: 'auto' // Always allow pointer events for both clicking and panning
+                  }}
+                >
+                  {/* Render points on overlay */}
+                  {allPoints.map((point) => (
+                    <div
+                      key={point.id}
+                      className="absolute w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold border border-white shadow-lg pointer-events-none"
+                      style={{
+                        backgroundColor: point.color,
+                        left: `${(point.x * zoom) + pan.x - 10}px`,
+                        top: `${(point.y * zoom) + pan.y - 10}px`,
+                        transform: `scale(${Math.max(0.8, 1/zoom)})`, // Keep points readable at all zoom levels
+                        zIndex: 20,
+                      }}
+                    >
+                      {point.symbol}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Instructions overlay */}
+                {!isSelecting && (
+                  <div className="absolute bottom-4 left-4 bg-black bg-opacity-75 text-white text-xs px-3 py-2 rounded pointer-events-none">
+                    Drag to pan • Use zoom controls above
                   </div>
-                ))}
+                )}
               </div>
             </>
           ) : (

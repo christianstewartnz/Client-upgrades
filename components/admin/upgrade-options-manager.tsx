@@ -85,13 +85,23 @@ export function UpgradeOptionsManager({
 
   useEffect(() => {
     const fetchPreviousProjects = async () => {
+      if (!projectId) {
+        console.log('No projectId provided, skipping projects fetch')
+        setLoadingProjects(false)
+        return
+      }
+
       setLoadingProjects(true)
       try {
+        console.log('Fetching projects, current projectId:', projectId)
+        
         // Fetch all projects except the current one
         const { data: projects, error: projectsError } = await supabase
           .from('projects')
           .select('id, name')
           .neq('id', projectId)
+
+        console.log('Projects query result:', { projects, projectsError })
 
         if (projectsError) {
           console.error('Error fetching projects:', projectsError)
@@ -134,6 +144,7 @@ export function UpgradeOptionsManager({
         setPreviousProjects(projectsWithUpgrades)
       } catch (error) {
         console.error('Error fetching previous projects:', error)
+        console.error('Error details:', JSON.stringify(error, null, 2))
       } finally {
         setLoadingProjects(false)
       }

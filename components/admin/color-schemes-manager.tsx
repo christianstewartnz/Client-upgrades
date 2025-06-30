@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Edit, Trash2, Palette, ExternalLink } from "lucide-react"
+import { Plus, Edit, Trash2, Palette, ExternalLink, FileText, X } from "lucide-react"
 import type { ColorScheme } from '@/types/color-scheme'
 
 interface UnitType {
@@ -29,6 +29,14 @@ interface UnitType {
   allowedUpgrades: string[]
 }
 
+interface MaterialItem {
+  id: string
+  label: string
+  value: string
+  link: string | null
+  isCustom: boolean
+}
+
 interface ColorSchemesManagerProps {
   colorSchemes: ColorScheme[]
   unitTypes: UnitType[]
@@ -39,34 +47,47 @@ interface ColorSchemesManagerProps {
 export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesChange, projectId }: ColorSchemesManagerProps) {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [editingScheme, setEditingScheme] = useState<ColorScheme | null>(null)
+  
+  const getDefaultMaterials = (): MaterialItem[] => [
+    { id: "paint", label: "Paint", value: "", link: null, isCustom: false },
+    { id: "carpet", label: "Carpet", value: "", link: null, isCustom: false },
+    { id: "kitchen_floor", label: "Kitchen Floor", value: "", link: null, isCustom: false },
+    { id: "kitchen_splashback", label: "Kitchen Splashback", value: "", link: null, isCustom: false },
+    { id: "bathroom_tiles", label: "Bathroom Tiles", value: "", link: null, isCustom: false },
+  ]
+  
   const [newScheme, setNewScheme] = useState({
     name: "",
     description: "",
     color_board_file: null as string | null,
-    materials: {
-      paint: "",
-      paint_link: "" as string | null,
-      carpet: "",
-      carpet_link: "" as string | null,
-      kitchen_floor: "",
-      kitchen_floor_link: "" as string | null,
-      kitchen_splashback: "",
-      kitchen_splashback_link: "" as string | null,
-      bathroom_tiles: "",
-      bathroom_tiles_link: "" as string | null,
-    },
+    materials: getDefaultMaterials(),
     allowedUnitTypes: [] as string[],
   })
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
 
   const addColorScheme = () => {
-    if (newScheme.name && Object.values(newScheme.materials).some((material) => material && material.trim() !== "")) {
+    if (newScheme.name && newScheme.materials.some((material) => material.value && material.value.trim() !== "")) {
+      // Convert MaterialItem[] back to the expected ColorScheme materials format
+      const materialsObj = newScheme.materials.reduce((acc, material) => {
+        acc[material.id] = material.value
+        acc[`${material.id}_link`] = material.link
+        return acc
+      }, {} as any)
+
       const scheme: ColorScheme = {
         name: newScheme.name,
         description: newScheme.description,
-        materials: newScheme.materials,
+        color_board_file: uploadedFile ? uploadedFile.name : newScheme.color_board_file,
+        materials: materialsObj,
         allowedUnitTypes: newScheme.allowedUnitTypes,
         project_id: projectId
+      }
+
+      // Store the actual file object if uploaded (in a real app, you'd upload to cloud storage)
+      if (uploadedFile) {
+        console.log(`Color board file uploaded: ${uploadedFile.name}`)
+        // Here you would typically upload to cloud storage and get back a URL
+        // For now, we'll simulate this by storing the file name
       }
 
       onColorSchemesChange([...colorSchemes, scheme])
@@ -80,18 +101,7 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
       name: "",
       description: "",
       color_board_file: null,
-      materials: {
-        paint: "",
-        paint_link: null,
-        carpet: "",
-        carpet_link: null,
-        kitchen_floor: "",
-        kitchen_floor_link: null,
-        kitchen_splashback: "",
-        kitchen_splashback_link: null,
-        bathroom_tiles: "",
-        bathroom_tiles_link: null,
-      },
+      materials: getDefaultMaterials(),
       allowedUnitTypes: [],
     })
     setUploadedFile(null)
@@ -104,11 +114,42 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
 
   const editColorScheme = (scheme: ColorScheme) => {
     setEditingScheme(scheme)
+    
+    // Convert existing materials format to MaterialItem[]
+    const materialsArray: MaterialItem[] = []
+    const defaultMaterials = getDefaultMaterials()
+    
+    // Add default materials with existing values
+    defaultMaterials.forEach(defaultMaterial => {
+      const value = scheme.materials[defaultMaterial.id as keyof typeof scheme.materials] as string || ""
+      const link = scheme.materials[`${defaultMaterial.id}_link` as keyof typeof scheme.materials] as string || null
+      materialsArray.push({
+        ...defaultMaterial,
+        value,
+        link
+      })
+    })
+    
+    // Add any custom materials that exist in the scheme but not in defaults
+    Object.keys(scheme.materials).forEach(key => {
+      if (!key.endsWith('_link') && !defaultMaterials.some(dm => dm.id === key)) {
+        const value = scheme.materials[key as keyof typeof scheme.materials] as string || ""
+        const link = scheme.materials[`${key}_link` as keyof typeof scheme.materials] as string || null
+        materialsArray.push({
+          id: key,
+          label: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+          value,
+          link,
+          isCustom: true
+        })
+      }
+    })
+    
     setNewScheme({
       name: scheme.name,
       description: scheme.description,
       color_board_file: scheme.color_board_file || null,
-      materials: { ...scheme.materials },
+      materials: materialsArray,
       allowedUnitTypes: [...scheme.allowedUnitTypes],
     })
     setUploadedFile(null)
@@ -119,19 +160,33 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
     if (
       editingScheme &&
       newScheme.name &&
-      Object.values(newScheme.materials).some((material) => material && material.trim() !== "")
+      newScheme.materials.some((material) => material.value && material.value.trim() !== "")
     ) {
+      // Convert MaterialItem[] back to the expected ColorScheme materials format
+      const materialsObj = newScheme.materials.reduce((acc, material) => {
+        acc[material.id] = material.value
+        acc[`${material.id}_link`] = material.link
+        return acc
+      }, {} as any)
+
       const updatedSchemes = colorSchemes.map((cs) =>
         cs.id === editingScheme.id
           ? {
               ...cs,
               name: newScheme.name,
               description: newScheme.description,
-              materials: newScheme.materials,
+              color_board_file: uploadedFile ? uploadedFile.name : newScheme.color_board_file,
+              materials: materialsObj,
               allowedUnitTypes: newScheme.allowedUnitTypes,
             }
           : cs,
       )
+
+      // Handle file upload for update
+      if (uploadedFile) {
+        console.log(`Color board file updated: ${uploadedFile.name}`)
+        // Here you would typically upload to cloud storage and get back a URL
+      }
 
       onColorSchemesChange(updatedSchemes)
       resetForm()
@@ -147,13 +202,36 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
     setNewScheme((prev) => ({ ...prev, allowedUnitTypes: updatedTypes }))
   }
 
-  const updateMaterial = (materialKey: keyof ColorScheme["materials"], value: string | null) => {
-    setNewScheme((prev) => ({
+  const addCustomMaterial = () => {
+    const newId = `custom_${Date.now()}`
+    const newMaterial: MaterialItem = {
+      id: newId,
+      label: "Custom Material",
+      value: "",
+      link: null,
+      isCustom: true
+    }
+    setNewScheme(prev => ({
       ...prev,
-      materials: {
-        ...prev.materials,
-        [materialKey]: value,
-      },
+      materials: [...prev.materials, newMaterial]
+    }))
+  }
+
+  const removeMaterial = (materialId: string) => {
+    setNewScheme(prev => ({
+      ...prev,
+      materials: prev.materials.filter(m => m.id !== materialId)
+    }))
+  }
+
+  const updateMaterial = (materialId: string, field: 'label' | 'value' | 'link', value: string) => {
+    setNewScheme(prev => ({
+      ...prev,
+      materials: prev.materials.map(m => 
+        m.id === materialId 
+          ? { ...m, [field]: field === 'link' ? (value || null) : value }
+          : m
+      )
     }))
   }
 
@@ -167,13 +245,7 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
       .join(", ");
   }
 
-  const materialFields = [
-    { key: "paint", label: "Paint", linkKey: "paint_link" },
-    { key: "carpet", label: "Carpet", linkKey: "carpet_link" },
-    { key: "kitchen_floor", label: "Kitchen Floor", linkKey: "kitchen_floor_link" },
-    { key: "kitchen_splashback", label: "Kitchen Splashback", linkKey: "kitchen_splashback_link" },
-    { key: "bathroom_tiles", label: "Bathroom Tiles", linkKey: "bathroom_tiles_link" },
-  ]
+
 
   return (
     <div className="space-y-6">
@@ -181,22 +253,22 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
         <CardHeader>
           <div className="flex justify-between items-center">
             <div>
-              <CardTitle>Color Schemes</CardTitle>
-              <CardDescription>Define color schemes and material selections for units</CardDescription>
+              <CardTitle>Colours and Finishes</CardTitle>
+              <CardDescription>Define colour and finish schemes and material selections for units</CardDescription>
             </div>
 
             <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
               <DialogTrigger asChild>
                 <Button className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
-                  Add Color Scheme
+                  Add Scheme
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>{editingScheme ? "Edit Color Scheme" : "Add New Color Scheme"}</DialogTitle>
+                  <DialogTitle>{editingScheme ? "Edit Scheme" : "Add New Scheme"}</DialogTitle>
                   <DialogDescription>
-                    Create or edit a color scheme with material selections for your project units
+                    Create or edit colour and finish schemes with material selections for your project units
                   </DialogDescription>
                 </DialogHeader>
 
@@ -223,7 +295,7 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
                   </div>
 
                   <div>
-                    <Label htmlFor="color-board-file">Color Board File</Label>
+                    <Label htmlFor="color-board-file">Colour Board File</Label>
                     <div className="mt-2">
                       <input
                         type="file"
@@ -233,9 +305,7 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
                           const file = e.target.files?.[0]
                           if (file) {
                             setUploadedFile(file)
-                            // For now, we'll just store the file name
-                            // In a real implementation, you'd upload to cloud storage
-                            setNewScheme((prev) => ({ ...prev, color_board_file: file.name }))
+                            console.log(`Color board file selected: ${file.name}`)
                           }
                         }}
                         className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
@@ -248,33 +318,72 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-1">
-                      Upload a color board PDF or image file for clients to download
+                      Upload a colour board PDF or image file for clients to download
                     </p>
                   </div>
 
                   <div>
-                    <Label className="text-lg font-semibold">Materials & Colors</Label>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Add at least one material specification. Include supplier links for easy ordering.
-                    </p>
+                    <div className="flex justify-between items-center mb-4">
+                      <div>
+                        <Label className="text-lg font-semibold">Materials & Colours</Label>
+                        <p className="text-sm text-gray-600">
+                          Add at least one material specification. Include supplier links for easy ordering.
+                        </p>
+                      </div>
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={addCustomMaterial}
+                        className="flex items-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add Option
+                      </Button>
+                    </div>
                     <div className="grid gap-4">
-                      {materialFields.map((field) => (
-                        <div key={field.key} className="grid grid-cols-2 gap-2">
+                      {newScheme.materials.map((material) => (
+                        <div key={material.id} className="grid grid-cols-2 gap-2 p-3 border rounded-lg">
+                          <div className="col-span-2 flex justify-between items-center mb-2">
+                            <div className="flex items-center gap-2">
+                              {material.isCustom ? (
+                                <Input
+                                  value={material.label}
+                                  onChange={(e) => updateMaterial(material.id, 'label', e.target.value)}
+                                  placeholder="Material name"
+                                  className="w-40 h-7 text-sm font-medium"
+                                />
+                              ) : (
+                                <Label className="font-medium">{material.label}</Label>
+                              )}
+                              {material.isCustom && <Badge variant="secondary" className="text-xs">Custom</Badge>}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeMaterial(material.id)}
+                              className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                              title={material.isCustom ? "Remove custom material" : "Remove default material"}
+                            >
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </div>
                           <div>
-                            <Label htmlFor={`material-${field.key}`}>{field.label}</Label>
+                            <Label htmlFor={`material-${material.id}`} className="text-sm">Specification</Label>
                             <Input
-                              id={`material-${field.key}`}
-                              value={newScheme.materials[field.key as keyof typeof newScheme.materials] as string}
-                              onChange={(e) => updateMaterial(field.key as keyof ColorScheme["materials"], e.target.value)}
-                              placeholder={`${field.label} color/specification`}
+                              id={`material-${material.id}`}
+                              value={material.value}
+                              onChange={(e) => updateMaterial(material.id, 'value', e.target.value)}
+                              placeholder={`${material.label} colour/specification`}
                             />
                           </div>
                           <div>
-                            <Label htmlFor={`link-${field.key}`}>Supplier Link</Label>
+                            <Label htmlFor={`link-${material.id}`} className="text-sm">Supplier Link</Label>
                             <Input
-                              id={`link-${field.key}`}
-                              value={(newScheme.materials[field.linkKey as keyof typeof newScheme.materials] as string) || ""}
-                              onChange={(e) => updateMaterial(field.linkKey as keyof ColorScheme["materials"], e.target.value || null)}
+                              id={`link-${material.id}`}
+                              value={material.link || ""}
+                              onChange={(e) => updateMaterial(material.id, 'link', e.target.value)}
                               placeholder="https://supplier.com/product"
                             />
                           </div>
@@ -307,7 +416,7 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
 
                 <div className="flex gap-2 pt-4">
                   <Button onClick={editingScheme ? updateColorScheme : addColorScheme} className="flex-1">
-                    {editingScheme ? "Update Color Scheme" : "Add Color Scheme"}
+                    {editingScheme ? "Update Scheme" : "Add Scheme"}
                   </Button>
                   <Button
                     variant="outline"
@@ -329,13 +438,13 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
           {colorSchemes.length === 0 ? (
             <div className="text-center py-8">
               <Palette className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600 mb-4">No color schemes created yet</p>
+              <p className="text-gray-600 mb-4">No schemes created yet</p>
               <p className="text-sm text-gray-500 mb-4">
-                Color schemes define the material selections available to clients for each unit type
+                Colour and finish schemes define the material selections available to clients for each unit type
               </p>
               <Button onClick={() => setShowAddDialog(true)}>
                 <Plus className="w-4 h-4 mr-2" />
-                Add Your First Color Scheme
+                Add Your First Scheme
               </Button>
             </div>
           ) : (
@@ -350,17 +459,19 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-sm mb-3">
-                        {materialFields.map((field) => {
-                          const materialValue = scheme.materials[field.key as keyof typeof scheme.materials] as string
-                          const linkValue = scheme.materials[field.linkKey as keyof typeof scheme.materials] as string
+                        {Object.entries(scheme.materials).map(([key, value]) => {
+                          // Skip link keys and empty values
+                          if (key.endsWith('_link') || !value) return null
 
-                          if (!materialValue) return null
+                          const linkKey = `${key}_link`
+                          const linkValue = scheme.materials[linkKey as keyof typeof scheme.materials] as string
+                          const displayLabel = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')
 
                           return (
-                            <div key={field.key} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                            <div key={key} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                               <div>
-                                <span className="font-medium text-gray-600">{field.label}:</span>
-                                <span className="ml-1">{materialValue}</span>
+                                <span className="font-medium text-gray-600">{displayLabel}:</span>
+                                <span className="ml-1">{value}</span>
                               </div>
                               {linkValue && (
                                 <a
@@ -378,6 +489,16 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
                       </div>
 
                       <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          {scheme.color_board_file ? (
+                            <Badge variant="secondary" className="flex items-center gap-1">
+                              <FileText className="w-3 h-3" />
+                              Colour Board: {scheme.color_board_file}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline">No Colour Board</Badge>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-gray-500">Available for:</span>
                           {scheme.allowedUnitTypes.length > 0 ? (
@@ -410,7 +531,7 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
       {colorSchemes.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Color Schemes Summary</CardTitle>
+            <CardTitle className="text-lg">Schemes Summary</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-center">
@@ -429,8 +550,8 @@ export function ColorSchemesManager({ colorSchemes, unitTypes, onColorSchemesCha
                   {colorSchemes.reduce((sum, cs) => {
                     return (
                       sum +
-                      Object.values(cs.materials).filter(
-                        (value, index) => index % 2 === 1 && value, // Count only link fields that have values
+                      Object.entries(cs.materials).filter(
+                        ([key, value]) => key.endsWith('_link') && value
                       ).length
                     )
                   }, 0)}

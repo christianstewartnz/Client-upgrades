@@ -44,9 +44,15 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
   })
   const [showCredentialsModal, setShowCredentialsModal] = useState(false)
   const [createdCredentials, setCreatedCredentials] = useState<{ username: string; password: string } | null>(null)
-  const [selectedUnitCredentials, setSelectedUnitCredentials] = useState<{ username: string; password: string; unitNumber: string } | null>(null)
+  const [selectedUnitCredentials, setSelectedUnitCredentials] = useState<{
+    username: string;
+    password: string;
+    unitNumber: string;
+  } | null>(null)
   const [previewUnit, setPreviewUnit] = useState<Unit | null>(null)
   const [upgradeOptions, setUpgradeOptions] = useState<any[]>([])
+  const [editingUnitId, setEditingUnitId] = useState<string | null>(null)
+  const [uploadingFile, setUploadingFile] = useState<string | null>(null)
 
   // Fetch upgrade options for the project
   useEffect(() => {
@@ -80,10 +86,6 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
   const addUnit = async () => {
     console.log('Add Unit button clicked');
     console.log('newUnit:', newUnit);
-    console.log('unit_number:', newUnit.unit_number);
-    console.log('unit_type_id:', newUnit.unit_type_id);
-    console.log('unit_number length:', newUnit.unit_number.length);
-    console.log('unit_type_id length:', newUnit.unit_type_id.length);
     
     if (!newUnit.unit_number || !newUnit.unit_type_id || newUnit.unit_number.trim() === '' || newUnit.unit_type_id.trim() === '') {
       console.log('Missing required fields');
@@ -110,16 +112,47 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
         alert('Error creating unit: ' + data.error)
         return
       }
-      // Add the new unit to the list
-      onUnitsChange([...units, {
+      
+      // If a file was uploaded, save it to the database
+      if (newUnit.floor_plan_file) {
+        try {
+          const formData = new FormData()
+          formData.append('unitId', data.unit.id)
+          formData.append('file', newUnit.floor_plan_file)
+
+          const fileResponse = await fetch('/api/update-unit-floor-plan', {
+            method: 'POST',
+            body: formData
+          })
+
+          const fileData = await fileResponse.json()
+
+          if (!fileResponse.ok) {
+            console.error('Failed to save floor plan file:', fileData.error)
+          } else {
+            console.log(`Floor plan uploaded and saved: ${newUnit.floor_plan_file.name} at ${fileData.url}`)
+            // Update the unit data with the file URL
+            data.unit.floor_plan_url = fileData.url
+          }
+        } catch (error) {
+          console.error('Error saving floor plan:', error)
+        }
+      }
+
+      // Create the new unit object with the PDF file
+      const newUnitData = {
         id: data.unit.id,
         unit_number: newUnit.unit_number,
         unit_type_id: newUnit.unit_type_id,
-        floor_plan_file: null,
+        floor_plan_file: newUnit.floor_plan_file, // Include the uploaded file
+        floor_plan_url: data.unit.floor_plan_url, // Include the file URL if uploaded
         status: newUnit.status,
         username: data.username,
         password: data.password,
-      }])
+      }
+      
+      // Add the new unit to the list
+      onUnitsChange([...units, newUnitData])
       setCreatedCredentials({ username: data.username, password: data.password })
       setShowCredentialsModal(true)
       setNewUnit({ unit_number: "", unit_type_id: "", floor_plan_file: null, status: "active" })
@@ -141,7 +174,7 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
   }
 
   const copyLoginLink = (unitId: string) => {
-    const link = `${window.location.origin}/client/${unitId}`
+    const link = `${window.location.origin}/`
     navigator.clipboard.writeText(link)
     // You could add a toast notification here
   }
@@ -156,6 +189,57 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
 
   const showUnitPreview = (unit: Unit) => {
     setPreviewUnit(unit)
+  }
+
+  const handleFileUpload = async (unitId: string, file: File) => {
+    setUploadingFile(unitId)
+    
+    try {
+      // Create FormData to send the actual file
+      const formData = new FormData()
+      formData.append('unitId', unitId)
+      formData.append('file', file)
+
+      const response = await fetch('/api/update-unit-floor-plan', {
+        method: 'POST',
+        body: formData // Don't set Content-Type header, let browser set it for FormData
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to upload file')
+      }
+
+      // Update the unit in the local state with the returned data
+      const updatedUnits = units.map(unit => 
+        unit.id === unitId 
+          ? { ...unit, floor_plan_file: file, floor_plan_url: data.url }
+          : unit
+      )
+      onUnitsChange(updatedUnits)
+      
+      console.log(`File ${file.name} uploaded and saved for unit ${unitId} at ${data.url}`)
+      
+    } catch (error) {
+      console.error('Error uploading file:', error)
+      alert(`Error uploading file: ${error instanceof Error ? error.message : 'Please try again.'}`)
+    } finally {
+      setUploadingFile(null)
+    }
+  }
+
+  const triggerFileUpload = (unitId: string) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.pdf'
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (file) {
+        handleFileUpload(unitId, file)
+      }
+    }
+    input.click()
   }
 
   return (
@@ -306,21 +390,31 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                       </div>
                       <p className="text-gray-600 text-sm mb-2">Type: {getUnitTypeName(unit.unit_type_id)}</p>
                       <div className="flex items-center gap-2">
-                        {unit.floor_plan_file ? (
+                        {unit.floor_plan_url ? (
                           <div className="flex items-center gap-2">
                             <Badge variant="secondary" className="flex items-center gap-1">
                               <FileText className="w-3 h-3" />
-                              Floor Plan: {unit.floor_plan_file.name}
+                              Floor Plan: {unit.floor_plan_url.split('/').pop() || 'Uploaded'}
                             </Badge>
-                            <Button variant="outline" size="sm">
-                              Replace PDF
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => triggerFileUpload(unit.id)}
+                              disabled={uploadingFile === unit.id}
+                            >
+                              {uploadingFile === unit.id ? "Uploading..." : "Replace PDF"}
                             </Button>
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
                             <Badge variant="outline">No Floor Plan</Badge>
-                            <Button variant="outline" size="sm">
-                              Upload PDF
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => triggerFileUpload(unit.id)}
+                              disabled={uploadingFile === unit.id}
+                            >
+                              {uploadingFile === unit.id ? "Uploading..." : "Upload PDF"}
                             </Button>
                           </div>
                         )}
@@ -349,7 +443,7 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                         <Label className="text-xs font-medium text-gray-600">Client Access</Label>
                         <div className="flex items-center gap-2 mt-1">
                           <code className="text-xs bg-white px-2 py-1 rounded border flex-1 truncate">
-                            /client/{unit.id}
+                            / (Client Tab)
                           </code>
                           <Button variant="outline" size="sm" onClick={() => copyLoginLink(unit.id)}>
                             Copy Link
@@ -438,7 +532,7 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
               {/* Floor Plan Section */}
               <div className="border rounded-lg p-4">
                 <h3 className="font-semibold mb-3">Floor Plan</h3>
-                {previewUnit.floor_plan_file ? (
+                {previewUnit.floor_plan_url ? (
                   <div className="flex items-center gap-2 p-3 bg-gray-50 rounded border">
                     <FileText className="w-5 h-5 text-blue-600" />
                     <span className="text-sm font-medium">Floor plan available</span>
@@ -564,7 +658,7 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                   </div>
                   <div>
                     <p className="text-gray-600">Access Link</p>
-                    <code className="text-xs bg-white px-2 py-1 rounded border">/client/{previewUnit.id}</code>
+                    <code className="text-xs bg-white px-2 py-1 rounded border">/ (Client Tab)</code>
                   </div>
                 </div>
               </div>

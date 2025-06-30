@@ -174,7 +174,7 @@ export default function ProjectsPage() {
                         </Link>
                         <Link href={`/admin/projects/${project.id}/color-schemes`} passHref legacyBehavior>
                           <Button asChild variant="outline" className="flex items-center gap-2 w-full">
-                            <a><Settings className="w-4 h-4" />Color Schemes</a>
+                            <a><Settings className="w-4 h-4" />Finishes</a>
                           </Button>
                         </Link>
                       </div>

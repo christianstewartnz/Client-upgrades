@@ -4,7 +4,7 @@ interface StepIndicatorProps {
 
 export function StepIndicator({ currentStep }: StepIndicatorProps) {
   const steps = [
-    { number: 1, title: "Color Scheme", description: "Choose your preferred style" },
+    { number: 1, title: "Finishes", description: "Choose your preferred style" },
     { number: 2, title: "Upgrade Options", description: "Select additional features" },
     { number: 3, title: "Floor Plan", description: "Mark upgrade locations" },
     { number: 4, title: "Review & Submit", description: "Confirm your selections" },

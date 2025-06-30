@@ -81,7 +81,7 @@ export default function UnitsPage() {
         // Fetch units for this project
         const { data: unitsData, error: unitsError } = await supabase
           .from('units')
-          .select('id, unit_number, unit_type_id, status, username, password')
+          .select('id, unit_number, unit_type_id, status, username, password, floor_plan_url')
           .eq('project_id', projectId)
         if (unitsError) throw unitsError
         setUnits(
@@ -89,7 +89,8 @@ export default function UnitsPage() {
             id: u.id,
             unit_number: u.unit_number,
             unit_type_id: u.unit_type_id,
-            floor_plan_file: null, // Not handled yet
+            floor_plan_file: null, // Don't fake a File object
+            floor_plan_url: u.floor_plan_url || '', // Store the actual URL
             status: u.status === 'active' ? 'active' : 'inactive',
             username: u.username || '',
             password: u.password || '',

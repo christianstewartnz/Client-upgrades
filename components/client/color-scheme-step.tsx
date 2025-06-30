@@ -95,9 +95,9 @@ export function ColorSchemeStep({ selected_scheme, on_scheme_change, unit_type, 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Step 1: Select Color Scheme</CardTitle>
+        <CardTitle>Step 1: Select Finishes</CardTitle>
         <CardDescription>
-          Choose your preferred color scheme for {unit_number}. This will determine the overall aesthetic of your
+          Choose your preferred finishes for {unit_number}. This will determine the overall aesthetic of your
           unit.
         </CardDescription>
       </CardHeader>

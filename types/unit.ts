@@ -15,6 +15,7 @@ export interface Unit {
   unit_number: string
   unit_type_id: string
   floor_plan_file: File | null
+  floor_plan_url?: string
   status: "active" | "inactive"
   username: string
   password: string

@@ -25,8 +25,9 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   ]
 
   const handleLogout = () => {
-    // Clear any stored authentication data (if any)
-    // For now, just redirect to home page
+    // Clear admin session
+    localStorage.removeItem('admin-session')
+    // Redirect to home page
     window.location.href = "/"
   }
 

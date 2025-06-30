@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,6 +36,9 @@ interface ProjectStatus {
 }
 
 export default function AdminDashboard() {
+  const router = useRouter()
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [authLoading, setAuthLoading] = useState(true)
   const [stats, setStats] = useState<DashboardStats>({
     totalProjects: 0,
     activeProjects: 0,
@@ -50,7 +54,34 @@ export default function AdminDashboard() {
   const [projectStatuses, setProjectStatuses] = useState<ProjectStatus[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Check admin authentication
   useEffect(() => {
+    const checkAuth = () => {
+      const adminSession = localStorage.getItem('admin-session')
+      if (adminSession) {
+        try {
+          const session = JSON.parse(adminSession)
+          if (session.role === 'admin') {
+            setIsAuthenticated(true)
+          } else {
+            router.push('/')
+          }
+        } catch (error) {
+          localStorage.removeItem('admin-session')
+          router.push('/')
+        }
+      } else {
+        router.push('/')
+      }
+      setAuthLoading(false)
+    }
+    
+    checkAuth()
+  }, [router])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    
     const fetchDashboardData = async () => {
       try {
         console.log('Starting dashboard data fetch...')
@@ -280,12 +311,34 @@ export default function AdminDashboard() {
     }
 
     fetchDashboardData()
-  }, [])
+      }, [isAuthenticated])
 
   // Debug effect to track when stats change
   useEffect(() => {
     console.log('Stats state updated:', stats)
   }, [stats])
+
+  // Check authentication first
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <span className="text-lg text-gray-500">Checking authentication...</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-2">
+          <span className="text-lg text-gray-500">Redirecting to login...</span>
+        </div>
+      </div>
+    )
+  }
 
   // Check if Supabase is configured
   const supabaseConfigured = process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
