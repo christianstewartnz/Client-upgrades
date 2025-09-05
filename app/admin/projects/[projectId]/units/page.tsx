@@ -81,19 +81,37 @@ export default function UnitsPage() {
         // Fetch units for this project
         const { data: unitsData, error: unitsError } = await supabase
           .from('units')
-          .select('id, unit_number, unit_type_id, status, username, password, floor_plan_url')
+          .select('id, unit_number, project_id, unit_type_id, status, username, password, floor_plan_url')
           .eq('project_id', projectId)
         if (unitsError) throw unitsError
+
+        // Fetch sales list assignments for units
+        const unitIds = (unitsData || []).map((u: any) => u.id)
+        let salesListAssignments: any[] = []
+        if (unitIds.length > 0) {
+          const { data: salesListData, error: salesListError } = await supabase
+            .from('sales_list_units')
+            .select('unit_id, sales_list_id')
+            .in('unit_id', unitIds)
+          if (!salesListError) {
+            salesListAssignments = salesListData || []
+          }
+        }
+
         setUnits(
           (unitsData || []).map((u: any) => ({
             id: u.id,
             unit_number: u.unit_number,
+            project_id: u.project_id,
             unit_type_id: u.unit_type_id,
             floor_plan_file: null, // Don't fake a File object
             floor_plan_url: u.floor_plan_url || '', // Store the actual URL
             status: u.status === 'active' ? 'active' : 'inactive',
             username: u.username || '',
             password: u.password || '',
+            sales_list_assignments: salesListAssignments
+              .filter(sla => sla.unit_id === u.id)
+              .map(sla => sla.sales_list_id)
           }))
         )
 

@@ -66,6 +66,21 @@ interface SalesList {
   created_at: string
 }
 
+interface SalesListVersion {
+  id: string
+  sales_list_id: string
+  version_number: number
+  version_name?: string
+  description?: string
+  created_by: string
+  created_at: string
+  is_current: boolean
+  total_units: number
+  units_with_prices: number
+  average_list_price?: number
+  total_list_value?: number
+}
+
 export default function SalesListPage() {
   const params = useParams()
   const projectId = params.projectId as string
@@ -95,6 +110,18 @@ export default function SalesListPage() {
   const [editingPrices, setEditingPrices] = useState<{[key: string]: {listPrice?: boolean, soldPrice?: boolean}}>({})
   const [tempPrices, setTempPrices] = useState<{[key: string]: {listPrice?: string, soldPrice?: string}}>({})
   const [updatingPrice, setUpdatingPrice] = useState<string | null>(null)
+  
+  // Version management state
+  const [versions, setVersions] = useState<SalesListVersion[]>([])
+  const [showVersionDialog, setShowVersionDialog] = useState(false)
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false)
+  const [versionForm, setVersionForm] = useState({
+    version_name: '',
+    description: ''
+  })
+  const [savingVersion, setSavingVersion] = useState(false)
+  const [activeTab, setActiveTab] = useState<'current' | 'history'>('current')
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   // Fetch project data
   useEffect(() => {
@@ -106,8 +133,24 @@ export default function SalesListPage() {
   useEffect(() => {
     if (activeSalesList) {
       fetchSalesListUnits()
+      fetchVersions()
     }
   }, [activeSalesList])
+
+  const fetchVersions = async () => {
+    if (!activeSalesList) return
+
+    try {
+      const response = await fetch(`/api/sales-lists/${activeSalesList.id}/versions`)
+      const data = await response.json()
+      
+      if (data.success) {
+        setVersions(data.data || [])
+      }
+    } catch (error) {
+      console.error('Error fetching versions:', error)
+    }
+  }
 
   const fetchProjectUnits = async () => {
     try {
@@ -153,9 +196,6 @@ export default function SalesListPage() {
     if (!activeSalesList) return
 
     try {
-      // Get all units for this project
-      const allUnits = availableUnits
-
       // Get sales list configuration for units in this sales list
       const { data: salesListData, error: salesError } = await supabase
         .from('sales_list_units')
@@ -164,8 +204,16 @@ export default function SalesListPage() {
 
       if (salesError) throw salesError
 
-      // Get client assignments for all units
-      const unitIds = allUnits.map(unit => unit.id)
+      // For Master sales list, show all units. For others, only show assigned units.
+      let unitsToShow = availableUnits
+      if (activeSalesList.name !== 'Master') {
+        // Filter to only show units that are assigned to this sales list
+        const assignedUnitIds = salesListData?.map(slu => slu.unit_id) || []
+        unitsToShow = availableUnits.filter(unit => assignedUnitIds.includes(unit.id))
+      }
+
+      // Get client assignments for units to show
+      const unitIds = unitsToShow.map(unit => unit.id)
       let clientData: any[] = []
       
       if (unitIds.length > 0) {
@@ -183,8 +231,8 @@ export default function SalesListPage() {
         }
       }
 
-      // Merge all data: show all units, with sales list config if they're in the list
-      const unitsWithAllData = allUnits.map(unit => {
+      // Merge all data
+      const unitsWithAllData = unitsToShow.map(unit => {
         const salesListConfig = salesListData?.find(slu => slu.unit_id === unit.id)
         const client = clientData.find(c => c.unit_id === unit.id)?.client
 
@@ -194,7 +242,7 @@ export default function SalesListPage() {
           unit_id: unit.id,
           list_price: salesListConfig?.list_price || null,
           sold_price: salesListConfig?.sold_price || null,
-          status: salesListConfig?.status || 'not_in_list',
+          status: salesListConfig?.status || 'available',
           notes: salesListConfig?.notes || null,
           unit: unit,
           client: client,
@@ -419,6 +467,9 @@ export default function SalesListPage() {
           : unit
       ))
 
+      // Mark as having unsaved changes
+      setHasUnsavedChanges(true)
+
       // Clear editing state
       cancelEditingPrice(unitId, priceType)
     } catch (error) {
@@ -448,11 +499,85 @@ export default function SalesListPage() {
           ? { ...unit, [priceType === 'listPrice' ? 'list_price' : 'sold_price']: null }
           : unit
       ))
+
+      // Mark as having unsaved changes
+      setHasUnsavedChanges(true)
     } catch (error) {
       console.error('Error removing price:', error)
       alert('Failed to remove price')
     } finally {
       setUpdatingPrice(null)
+    }
+  }
+
+  const saveVersion = async () => {
+    if (!activeSalesList) return
+
+    try {
+      setSavingVersion(true)
+      
+      const response = await fetch(`/api/sales-lists/${activeSalesList.id}/versions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version_name: versionForm.version_name.trim() || undefined,
+          description: versionForm.description.trim() || undefined,
+          created_by: 'admin' // TODO: Replace with actual user
+        })
+      })
+
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save version')
+      }
+
+      // Refresh versions list
+      await fetchVersions()
+      
+      // Reset form and close dialog
+      setVersionForm({ version_name: '', description: '' })
+      setShowVersionDialog(false)
+      setHasUnsavedChanges(false)
+      
+      alert('Version saved successfully!')
+    } catch (error) {
+      console.error('Error saving version:', error)
+      alert(`Error saving version: ${error instanceof Error ? error.message : 'Please try again'}`)
+    } finally {
+      setSavingVersion(false)
+    }
+  }
+
+  const restoreVersion = async (versionId: string) => {
+    if (!confirm('This will replace all current prices with the selected version. Are you sure?')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/sales-lists/versions/${versionId}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          created_by: 'admin' // TODO: Replace with actual user
+        })
+      })
+
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to restore version')
+      }
+
+      // Refresh current data
+      await fetchSalesListUnits()
+      await fetchVersions()
+      setHasUnsavedChanges(false)
+      
+      alert('Version restored successfully!')
+    } catch (error) {
+      console.error('Error restoring version:', error)
+      alert(`Error restoring version: ${error instanceof Error ? error.message : 'Please try again'}`)
     }
   }
 
@@ -544,19 +669,48 @@ export default function SalesListPage() {
       {activeSalesList ? (
         <Card>
           <CardHeader>
-                          <div>
-                <CardTitle>{activeSalesList.name}</CardTitle>
+            <div className="flex justify-between items-start">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  {activeSalesList.name}
+                  {hasUnsavedChanges && (
+                    <Badge variant="outline" className="text-orange-600 border-orange-600">
+                      Unsaved Changes
+                    </Badge>
+                  )}
+                </CardTitle>
                 <CardDescription>{activeSalesList.description}</CardDescription>
               </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setActiveTab(activeTab === 'current' ? 'history' : 'current')}
+                  className="flex items-center gap-2"
+                >
+                  {activeTab === 'current' ? 'View History' : 'Back to Current'}
+                </Button>
+                {activeTab === 'current' && (
+                  <Button
+                    onClick={() => setShowVersionDialog(true)}
+                    disabled={!hasUnsavedChanges}
+                    className="flex items-center gap-2"
+                  >
+                    <DollarSign className="w-4 h-4" />
+                    Save Version
+                  </Button>
+                )}
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            {salesListUnits.length === 0 ? (
-              <div className="text-center py-8">
-                <Home className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-4">No units found for this project</p>
-                <p className="text-sm text-gray-500">Create units in the Units section to see them here</p>
-              </div>
-            ) : (
+            {activeTab === 'current' ? (
+              salesListUnits.length === 0 ? (
+                <div className="text-center py-8">
+                  <Home className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600 mb-4">No units found for this project</p>
+                  <p className="text-sm text-gray-500">Create units in the Units section to see them here</p>
+                </div>
+              ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -758,6 +912,76 @@ export default function SalesListPage() {
                   ))}
                 </TableBody>
               </Table>
+              )
+            ) : (
+              // History Tab
+              <div className="space-y-4">
+                <div className="text-sm text-gray-600 mb-4">
+                  Version history for {activeSalesList.name}. Click on any version to restore it.
+                </div>
+                {versions.length === 0 ? (
+                  <div className="text-center py-8">
+                    <DollarSign className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-4">No version history available</p>
+                    <p className="text-sm text-gray-500">Create your first version by making changes and saving</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {versions.map((version) => (
+                      <div 
+                        key={version.id} 
+                        className={`border rounded-lg p-4 ${version.is_current ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="font-semibold">
+                                Version {version.version_number}
+                                {version.version_name && ` - ${version.version_name}`}
+                              </h3>
+                              {version.is_current && (
+                                <Badge variant="default">Current</Badge>
+                              )}
+                            </div>
+                            {version.description && (
+                              <p className="text-sm text-gray-600 mb-2">{version.description}</p>
+                            )}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-500">
+                              <div>
+                                <span className="font-medium">Created:</span><br />
+                                {new Date(version.created_at).toLocaleDateString()} {new Date(version.created_at).toLocaleTimeString()}
+                              </div>
+                              <div>
+                                <span className="font-medium">Total Units:</span><br />
+                                {version.total_units}
+                              </div>
+                              <div>
+                                <span className="font-medium">With Prices:</span><br />
+                                {version.units_with_prices}
+                              </div>
+                              <div>
+                                <span className="font-medium">Avg Price:</span><br />
+                                {version.average_list_price ? `$${version.average_list_price.toLocaleString()}` : 'N/A'}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 ml-4">
+                            {!version.is_current && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => restoreVersion(version.id)}
+                              >
+                                Restore
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -833,6 +1057,60 @@ export default function SalesListPage() {
             <div className="flex gap-2">
               <Button onClick={assignClient} className="flex-1">Assign Client</Button>
               <Button variant="outline" onClick={() => setShowAssignClientDialog(false)} className="flex-1">Cancel</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save Version Dialog */}
+      <Dialog open={showVersionDialog} onOpenChange={setShowVersionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Price List Version</DialogTitle>
+            <DialogDescription>
+              Create a snapshot of the current pricing data for {activeSalesList?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="versionName">Version Name (Optional)</Label>
+              <Input
+                id="versionName"
+                value={versionForm.version_name}
+                onChange={(e) => setVersionForm(prev => ({ ...prev, version_name: e.target.value }))}
+                placeholder="e.g., January 2024 Pricing, Pre-launch Rates"
+              />
+            </div>
+            <div>
+              <Label htmlFor="versionDescription">Description (Optional)</Label>
+              <Input
+                id="versionDescription"
+                value={versionForm.description}
+                onChange={(e) => setVersionForm(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Describe what changed in this version"
+              />
+            </div>
+            <div className="text-sm text-gray-600">
+              This will save the current state of all unit prices and statuses in this sales list.
+            </div>
+            <div className="flex gap-2 pt-4">
+              <Button 
+                onClick={saveVersion} 
+                disabled={savingVersion}
+                className="flex-1"
+              >
+                {savingVersion ? 'Saving...' : 'Save Version'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowVersionDialog(false)
+                  setVersionForm({ version_name: '', description: '' })
+                }}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </DialogContent>

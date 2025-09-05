@@ -16,7 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Plus, Edit, Trash2, FileText, Copy, Building, UserPlus } from "lucide-react"
-import type { Unit, UnitType } from '../../types/unit'
+import type { Unit, UnitType, SalesList } from '../../types/unit'
 import { supabase } from "@/lib/supabase"
 
 interface UnitsManagerProps {
@@ -31,16 +31,19 @@ interface UnitsManagerProps {
 export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, projectName, projectId }: UnitsManagerProps) {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null)
+  const [salesLists, setSalesLists] = useState<SalesList[]>([])
   const [newUnit, setNewUnit] = useState<{
     unit_number: string;
     unit_type_id: string;
     floor_plan_file: File | null;
     status: "active" | "inactive";
+    sales_list_assignments: string[];
   }>({
     unit_number: "",
     unit_type_id: "",
     floor_plan_file: null,
     status: "active",
+    sales_list_assignments: [],
   })
   const [showCredentialsModal, setShowCredentialsModal] = useState(false)
   const [createdCredentials, setCreatedCredentials] = useState<{ username: string; password: string } | null>(null)
@@ -64,7 +67,7 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
   const [inviteLoading, setInviteLoading] = useState(false)
   const [generatedInvite, setGeneratedInvite] = useState<{ link: string; token: string } | null>(null)
 
-  // Fetch upgrade options for the project
+  // Fetch upgrade options and sales lists for the project
   useEffect(() => {
     const fetchUpgradeOptions = async () => {
       try {
@@ -84,8 +87,28 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
       }
     }
 
+    const fetchSalesLists = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('sales_lists')
+          .select('*')
+          .eq('project_id', projectId)
+          .order('created_at', { ascending: false })
+        
+        if (error) {
+          console.error('Error fetching sales lists:', error)
+          return
+        }
+        
+        setSalesLists(data || [])
+      } catch (err) {
+        console.error('Error fetching sales lists:', err)
+      }
+    }
+
     if (projectId) {
       fetchUpgradeOptions()
+      fetchSalesLists()
     }
   }, [projectId])
 
@@ -122,6 +145,21 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
         alert('Error creating unit: ' + data.error)
         return
       }
+
+      // Assign unit to selected sales lists (excluding Master which is automatic)
+      if (newUnit.sales_list_assignments.length > 0) {
+        for (const salesListId of newUnit.sales_list_assignments) {
+          try {
+            await fetch(`/api/sales-lists/${salesListId}/units`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ unitIds: [data.unit.id] })
+            })
+          } catch (error) {
+            console.error('Error assigning unit to sales list:', error)
+          }
+        }
+      }
       
       // If a file was uploaded, save it to the database
       if (newUnit.floor_plan_file) {
@@ -153,19 +191,27 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
       const newUnitData = {
         id: data.unit.id,
         unit_number: newUnit.unit_number,
+        project_id: projectId,
         unit_type_id: newUnit.unit_type_id,
         floor_plan_file: newUnit.floor_plan_file, // Include the uploaded file
         floor_plan_url: data.unit.floor_plan_url, // Include the file URL if uploaded
         status: newUnit.status,
         username: data.username,
         password: data.password,
+        sales_list_assignments: newUnit.sales_list_assignments,
       }
       
       // Add the new unit to the list
       onUnitsChange([...units, newUnitData])
       setCreatedCredentials({ username: data.username, password: data.password })
       setShowCredentialsModal(true)
-      setNewUnit({ unit_number: "", unit_type_id: "", floor_plan_file: null, status: "active" })
+      setNewUnit({ 
+        unit_number: "", 
+        unit_type_id: "", 
+        floor_plan_file: null, 
+        status: "active",
+        sales_list_assignments: []
+      })
       setShowAddDialog(false)
     } catch (error) {
       console.error('Error creating unit:', error);
@@ -398,6 +444,49 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                     </Select>
                   </div>
 
+                  <div>
+                    <Label htmlFor="salesLists">Sales Lists (Optional)</Label>
+                    <div className="space-y-2 mt-2">
+                      <div className="text-xs text-gray-500 mb-2">
+                        Select which sales lists this unit should appear in. Units are automatically added to the "Master" sales list.
+                      </div>
+                      {salesLists.filter(sl => sl.name !== 'Master').map((salesList) => (
+                        <div key={salesList.id} className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id={`salesList-${salesList.id}`}
+                            checked={newUnit.sales_list_assignments.includes(salesList.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setNewUnit(prev => ({
+                                  ...prev,
+                                  sales_list_assignments: [...prev.sales_list_assignments, salesList.id]
+                                }))
+                              } else {
+                                setNewUnit(prev => ({
+                                  ...prev,
+                                  sales_list_assignments: prev.sales_list_assignments.filter(id => id !== salesList.id)
+                                }))
+                              }
+                            }}
+                            className="rounded border-gray-300"
+                          />
+                          <Label htmlFor={`salesList-${salesList.id}`} className="text-sm">
+                            {salesList.name}
+                            {salesList.description && (
+                              <span className="text-gray-500 ml-1">- {salesList.description}</span>
+                            )}
+                          </Label>
+                        </div>
+                      ))}
+                      {salesLists.filter(sl => sl.name !== 'Master').length === 0 && (
+                        <div className="text-sm text-gray-500 italic">
+                          No additional sales lists available. Create sales lists in the Sales section.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="flex gap-2 pt-4">
                     <Button onClick={addUnit} className="flex-1">
                       Add Unit
@@ -406,7 +495,13 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                       variant="outline"
                       onClick={() => {
                         setShowAddDialog(false)
-                        setNewUnit({ unit_number: "", unit_type_id: "", floor_plan_file: null, status: "active" })
+                        setNewUnit({ 
+                          unit_number: "", 
+                          unit_type_id: "", 
+                          floor_plan_file: null, 
+                          status: "active",
+                          sales_list_assignments: []
+                        })
                       }}
                       className="flex-1"
                     >
@@ -802,7 +897,7 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                       return acc
                     }, {} as Record<string, any[]>)
 
-                    return Object.entries(upgradesByCategory).map(([category, upgrades]: [string, any[]]) => (
+                    return Object.entries(upgradesByCategory).map(([category, upgrades]) => (
                       <div key={category} className="space-y-3">
                         <h4 className="text-sm font-semibold text-gray-700 border-b border-gray-200 pb-2">
                           {category}

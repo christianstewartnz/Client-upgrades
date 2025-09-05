@@ -34,6 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_unit_types_project_id ON public.unit_types(projec
 CREATE TABLE IF NOT EXISTS public.units (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     unit_number text NOT NULL,
+    project_id uuid NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
     unit_type_id uuid NOT NULL REFERENCES public.unit_types(id) ON DELETE RESTRICT,
     floor_plan_url text,
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS public.units (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_units_unit_type_id ON public.units(unit_type_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_units_unit_number ON public.units(unit_number);
+CREATE INDEX IF NOT EXISTS idx_units_project_id ON public.units(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_units_project_unit_number ON public.units(project_id, unit_number);
 
 -- COLOR SCHEMES
 CREATE TABLE IF NOT EXISTS public.color_schemes (
