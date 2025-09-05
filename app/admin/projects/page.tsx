@@ -5,7 +5,7 @@ import { AdminLayout } from "@/components/admin/admin-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Building2, Users, Settings, ChevronDown, ChevronRight } from "lucide-react"
+import { Plus, Building2, Users, Settings, ChevronDown, ChevronRight, DollarSign } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
@@ -131,7 +131,11 @@ export default function ProjectsPage() {
                             <ChevronRight className="w-5 h-5 text-gray-500" />
                           )}
                           <div>
-                            <CardTitle className="text-xl">{project.name}</CardTitle>
+                            <Link href={`/admin/projects/${project.id}`}>
+                              <CardTitle className="text-xl hover:text-blue-600 transition-colors cursor-pointer">
+                                {project.name}
+                              </CardTitle>
+                            </Link>
                             <CardDescription>
                               {project.development_company} • {project.address}
                             </CardDescription>
@@ -152,9 +156,9 @@ export default function ProjectsPage() {
                   <CollapsibleContent>
                     <CardContent className="pt-0">
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                        <Link href={`/admin/projects/${project.id}`} passHref legacyBehavior>
+                        <Link href={`/admin/projects/${project.id}/sales`} passHref legacyBehavior>
                           <Button asChild variant="outline" className="flex items-center gap-2 w-full">
-                            <a><Building2 className="w-4 h-4" />Overview</a>
+                            <a><DollarSign className="w-4 h-4" />Sales Lists</a>
                           </Button>
                         </Link>
                         <Link href={`/admin/projects/${project.id}/unit-types`} passHref legacyBehavior>
