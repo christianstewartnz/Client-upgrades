@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Edit, Trash2, FileText, Copy, Building } from "lucide-react"
+import { Plus, Edit, Trash2, FileText, Copy, Building, UserPlus } from "lucide-react"
 import type { Unit, UnitType } from '../../types/unit'
 import { supabase } from "@/lib/supabase"
 
@@ -53,6 +53,16 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
   const [upgradeOptions, setUpgradeOptions] = useState<any[]>([])
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null)
   const [uploadingFile, setUploadingFile] = useState<string | null>(null)
+  const [showInviteDialog, setShowInviteDialog] = useState(false)
+  const [invitingUnit, setInvitingUnit] = useState<Unit | null>(null)
+  const [inviteForm, setInviteForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    expiresInDays: 14
+  })
+  const [inviteLoading, setInviteLoading] = useState(false)
+  const [generatedInvite, setGeneratedInvite] = useState<{ link: string; token: string } | null>(null)
 
   // Fetch upgrade options for the project
   useEffect(() => {
@@ -242,6 +252,56 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
     input.click()
   }
 
+  const handleInviteClient = (unit: Unit) => {
+    setInvitingUnit(unit)
+    setInviteForm({ name: '', email: '', phone: '', expiresInDays: 14 })
+    setGeneratedInvite(null)
+    setShowInviteDialog(true)
+  }
+
+  const createInvitation = async () => {
+    if (!invitingUnit || !inviteForm.name.trim() || !inviteForm.email.trim()) {
+      alert('Please fill in required fields (name and email)')
+      return
+    }
+
+    setInviteLoading(true)
+    try {
+      const response = await fetch('/api/invitations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          unitId: invitingUnit.id,
+          client: {
+            name: inviteForm.name.trim(),
+            email: inviteForm.email.trim(),
+            phone: inviteForm.phone.trim() || undefined
+          },
+          expiresInDays: inviteForm.expiresInDays
+        })
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create invitation')
+      }
+
+      setGeneratedInvite({ link: data.link, token: data.token })
+      
+      // Update the unit's username to reflect the new token
+      const updatedUnits = units.map(u => 
+        u.id === invitingUnit.id ? { ...u, username: data.token } : u
+      )
+      onUnitsChange(updatedUnits)
+
+    } catch (error) {
+      console.error('Error creating invitation:', error)
+      alert(`Error creating invitation: ${error instanceof Error ? error.message : 'Please try again'}`)
+    } finally {
+      setInviteLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -422,6 +482,9 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                     </div>
 
                     <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => handleInviteClient(unit)}>
+                        <UserPlus className="w-4 h-4" />
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => copyLoginLink(unit.id)}>
                         <Copy className="w-4 h-4" />
                       </Button>
@@ -515,6 +578,135 @@ export function UnitsManager({ units, unitTypes, colorSchemes, onUnitsChange, pr
                   <Button onClick={() => setSelectedUnitCredentials(null)}>Close</Button>
                 </div>
               </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Invite Client Dialog */}
+          <Dialog open={showInviteDialog} onOpenChange={setShowInviteDialog}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Invite Client - Unit {invitingUnit?.unit_number}</DialogTitle>
+                <DialogDescription>
+                  Create an invitation for a client to access the customization portal for this unit
+                </DialogDescription>
+              </DialogHeader>
+              
+              {!generatedInvite ? (
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="clientName">Client Name *</Label>
+                    <Input
+                      id="clientName"
+                      value={inviteForm.name}
+                      onChange={(e) => setInviteForm(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="John Smith"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="clientEmail">Email Address *</Label>
+                    <Input
+                      id="clientEmail"
+                      type="email"
+                      value={inviteForm.email}
+                      onChange={(e) => setInviteForm(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="john@example.com"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="clientPhone">Phone Number (optional)</Label>
+                    <Input
+                      id="clientPhone"
+                      value={inviteForm.phone}
+                      onChange={(e) => setInviteForm(prev => ({ ...prev, phone: e.target.value }))}
+                      placeholder="+64 21 123 4567"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="expiresIn">Invitation expires in (days)</Label>
+                    <Input
+                      id="expiresIn"
+                      type="number"
+                      min="1"
+                      max="365"
+                      value={inviteForm.expiresInDays}
+                      onChange={(e) => setInviteForm(prev => ({ ...prev, expiresInDays: parseInt(e.target.value) || 14 }))}
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2 pt-4">
+                    <Button 
+                      onClick={createInvitation} 
+                      disabled={inviteLoading || !inviteForm.name.trim() || !inviteForm.email.trim()}
+                      className="flex-1"
+                    >
+                      {inviteLoading ? 'Creating...' : 'Create Invitation'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowInviteDialog(false)}
+                      className="flex-1"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center">
+                        <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                      <h3 className="font-semibold text-green-800">Invitation Created Successfully!</h3>
+                    </div>
+                    <p className="text-sm text-green-700">
+                      Client {inviteForm.name} ({inviteForm.email}) has been invited to access Unit {invitingUnit?.unit_number}.
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <Label>Client Portal Link</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Input readOnly value={generatedInvite.link} className="font-mono text-sm" />
+                      <Button 
+                        type="button" 
+                        onClick={() => navigator.clipboard.writeText(generatedInvite.link)}
+                        size="sm"
+                      >
+                        Copy Link
+                      </Button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Share this link with the client. It expires in {inviteForm.expiresInDays} days.
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <Label>Access Token</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Input readOnly value={generatedInvite.token} className="font-mono text-sm" />
+                      <Button 
+                        type="button" 
+                        onClick={() => navigator.clipboard.writeText(generatedInvite.token)}
+                        size="sm"
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end pt-4">
+                    <Button onClick={() => setShowInviteDialog(false)}>
+                      Done
+                    </Button>
+                  </div>
+                </div>
+              )}
             </DialogContent>
           </Dialog>
         </CardContent>

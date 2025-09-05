@@ -158,8 +158,34 @@ export default function ClientPortal() {
     return upgrades.some((upgrade) => upgrade.category === "Electrical" || upgrade.category === "Lighting")
   }
 
-  const saveProgress = () => {
-    localStorage.setItem(`client-data-${token}`, JSON.stringify(clientData))
+  const saveProgress = async () => {
+    try {
+      // Save to localStorage immediately for responsive UX
+      localStorage.setItem(`client-data-${token}`, JSON.stringify(clientData))
+      
+      // Also save draft to database if we have enough data
+      if (unitId && (clientData.color_scheme || clientData.upgrades.length > 0)) {
+        const draftData = {
+          ...clientData,
+          is_submitted: false,
+          unit_id: unitId,
+          token: token,
+          client_name: `Client ${clientData.unit_number}`,
+          selected_upgrades: clientData.upgrades
+        }
+
+        await fetch('/api/submissions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(draftData)
+        })
+      }
+    } catch (error) {
+      console.error('Error saving progress:', error)
+      // Still saved to localStorage, so not critical
+    }
   }
 
   const updateColorScheme = (scheme: string) => {
@@ -170,11 +196,38 @@ export default function ClientPortal() {
     setClientData((prev: ClientData) => ({ ...prev, upgrades }))
   }
 
-  const submitSelections = () => {
-    const finalData = { ...clientData, is_submitted: true }
-    setClientData(finalData)
-    localStorage.setItem(`client-data-${token}`, JSON.stringify(finalData))
-    setCurrentStep(5)
+  const submitSelections = async () => {
+    try {
+      const submissionData = {
+        ...clientData,
+        is_submitted: true,
+        unit_id: unitId,
+        token: token,
+        client_name: `Client ${clientData.unit_number}`, // Default name, could be enhanced
+        selected_upgrades: clientData.upgrades
+      }
+
+      const response = await fetch('/api/submissions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(submissionData)
+      })
+
+      if (response.ok) {
+        const finalData = { ...clientData, is_submitted: true }
+        setClientData(finalData)
+        localStorage.setItem(`client-data-${token}`, JSON.stringify(finalData))
+        setCurrentStep(5)
+      } else {
+        console.error('Failed to submit selections')
+        // Could add user notification here
+      }
+    } catch (error) {
+      console.error('Error submitting selections:', error)
+      // Could add user notification here
+    }
   }
 
   const nextStep = () => {
